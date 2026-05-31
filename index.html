@@ -471,137 +471,217 @@ const COLS = 8, ROWS = 8;
 const GEM_TYPES = 7;
 const GEM_EMOJI = ['🍓','🍇','🍏','🍋','🍊','🍒','🍉'];
 
-let board = [], score = 0, level = 1, moves = 30, target = 2000, hiScore = 0;
-let selected = null, hints = 3, busy = false;
-let touchStart = null;
+const SAVE_KEY = 'fruitCascade_save';
+const HI_KEY   = 'fruitCascade_hi';
 
-const boardEl  = document.getElementById('board');
+let board = [];
+let score = 0, level = 1, moves = 30, target = 2000, hiScore = 0, hints = 3;
+let selected = null, busy = false, touchStart = null;
+
+const boardEl   = document.getElementById('board');
 const scoreEl   = document.getElementById('score-val');
-const levelEl   = document.getElementById('level-val');
 const targetEl  = document.getElementById('target-val');
 const movesEl   = document.getElementById('moves-val');
+const progEl    = document.getElementById('progress-bar');
+const hintCnt   = document.getElementById('hint-count');
 const hiscoreEl = document.getElementById('hiscore-val');
-const progEl   = document.getElementById('progress-bar');
-const hintCnt  = document.getElementById('hint-count');
-const overlay  = document.getElementById('overlay');
+const overlay   = document.getElementById('overlay');
 
-// ── Board helpers ──────────────────────────────────────────────────────────
+// ── Utilities ──────────────────────────────────────────────────────────────
 
-function rand(n) { return Math.floor(Math.random() * n); }
+function rnd(n) { return Math.floor(Math.random() * n); }
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function initBoard() {
+// ── Board ──────────────────────────────────────────────────────────────────
+
+function newBoard() {
   board = [];
   for (let r = 0; r < ROWS; r++) {
     board[r] = [];
     for (let c = 0; c < COLS; c++) {
-      board[r][c] = safeGem(r, c);
+      board[r][c] = safePick(r, c);
     }
   }
 }
 
-function safeGem(r, c) {
-  const excluded = new Set();
-  if (c >= 2 && board[r][c-1] === board[r][c-2]) excluded.add(board[r][c-1]);
-  if (r >= 2 && board[r-1] && board[r-1][c] === (board[r-2] && board[r-2][c])) {
-    if (board[r-1] && board[r-2]) excluded.add(board[r-1][c]);
-  }
+function safePick(r, c) {
+  const bad = new Set();
+  if (c >= 2 && board[r][c-1] === board[r][c-2]) bad.add(board[r][c-1]);
+  if (r >= 2 && board[r-1] && board[r-2] && board[r-1][c] === board[r-2][c]) bad.add(board[r-1][c]);
   let g;
-  do { g = rand(GEM_TYPES); } while (excluded.has(g));
+  do { g = rnd(GEM_TYPES); } while (bad.has(g));
   return g;
 }
 
-function hasMoves() {
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      if (c < COLS-1) {
-        swap(r, c, r, c+1);
-        if (findMatches().length) { swap(r, c, r, c+1); return true; }
-        swap(r, c, r, c+1);
-      }
-      if (r < ROWS-1) {
-        swap(r, c, r+1, c);
-        if (findMatches().length) { swap(r, c, r+1, c); return true; }
-        swap(r, c, r+1, c);
-      }
-    }
-  }
-  return false;
+function swapCells(r1, c1, r2, c2) {
+  const tmp = board[r1][c1];
+  board[r1][c1] = board[r2][c2];
+  board[r2][c2] = tmp;
 }
 
-function swap(r1,c1,r2,c2) {
-  [board[r1][c1], board[r2][c2]] = [board[r2][c2], board[r1][c1]];
-}
-
-function findMatches() {
-  const matched = new Set();
+function getMatches() {
+  const hits = new Set();
   // Horizontal
   for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS-2; c++) {
+    for (let c = 0; c < COLS - 2; c++) {
       const g = board[r][c];
-      if (g !== null && g === board[r][c+1] && g === board[r][c+2]) {
+      if (g === null) continue;
+      if (g === board[r][c+1] && g === board[r][c+2]) {
         let len = 3;
-        while (c+len < COLS && board[r][c+len] === g) len++;
-        for (let i = 0; i < len; i++) matched.add(r*COLS + c+i);
+        while (c + len < COLS && board[r][c+len] === g) len++;
+        for (let i = 0; i < len; i++) hits.add(r * COLS + c + i);
         c += len - 1;
       }
     }
   }
   // Vertical
   for (let c = 0; c < COLS; c++) {
-    for (let r = 0; r < ROWS-2; r++) {
+    for (let r = 0; r < ROWS - 2; r++) {
       const g = board[r][c];
-      if (g !== null && g === board[r+1][c] && g === board[r+2][c]) {
+      if (g === null) continue;
+      if (g === board[r+1][c] && g === board[r+2][c]) {
         let len = 3;
-        while (r+len < ROWS && board[r+len][c] === g) len++;
-        for (let i = 0; i < len; i++) matched.add((r+i)*COLS + c);
+        while (r + len < ROWS && board[r+len][c] === g) len++;
+        for (let i = 0; i < len; i++) hits.add((r+i) * COLS + c);
         r += len - 1;
       }
     }
   }
-  return [...matched].map(idx => ({ r: Math.floor(idx/COLS), c: idx%COLS }));
+  return [...hits].map(idx => [Math.floor(idx / COLS), idx % COLS]);
+}
+
+function hasValidMove() {
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (c < COLS - 1) {
+        swapCells(r, c, r, c+1);
+        const ok = getMatches().length > 0;
+        swapCells(r, c, r, c+1);
+        if (ok) return true;
+      }
+      if (r < ROWS - 1) {
+        swapCells(r, c, r+1, c);
+        const ok = getMatches().length > 0;
+        swapCells(r, c, r+1, c);
+        if (ok) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function shuffleBoard() {
+  const flat = board.flat().filter(g => g !== null);
+  for (let i = flat.length - 1; i > 0; i--) {
+    const j = rnd(i + 1);
+    [flat[i], flat[j]] = [flat[j], flat[i]];
+  }
+  let idx = 0;
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      board[r][c] = flat[idx++];
+  if (!hasValidMove()) shuffleBoard();
+}
+
+function dropAndFill() {
+  const newCells = new Set();
+  for (let c = 0; c < COLS; c++) {
+    // Compact downward
+    let empty = ROWS - 1;
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (board[r][c] !== null) {
+        board[empty][c] = board[r][c];
+        if (empty !== r) board[r][c] = null;
+        empty--;
+      }
+    }
+    // Fill top
+    for (let r = 0; r <= empty; r++) {
+      board[r][c] = rnd(GEM_TYPES);
+      newCells.add(r * COLS + c);
+    }
+  }
+  return newCells;
 }
 
 // ── Rendering ──────────────────────────────────────────────────────────────
 
-function render(dropCells = new Set(), newCells = new Set()) {
+function cell(r, c) { return boardEl.children[r * COLS + c]; }
+
+function render(newCells = new Set()) {
   boardEl.innerHTML = '';
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
-      const cell = document.createElement('div');
-      cell.className = 'cell';
-      cell.dataset.r = r; cell.dataset.c = c;
-
+      const div = document.createElement('div');
+      div.className = 'cell';
+      div.dataset.r = r;
+      div.dataset.c = c;
       const g = board[r][c];
       if (g !== null) {
         const gem = document.createElement('div');
-        gem.className = `gem gem-${g}`;
+        gem.className = 'gem gem-' + g;
         gem.textContent = GEM_EMOJI[g];
-        if (newCells.has(r*COLS+c)) cell.classList.add('drop-in');
-        cell.appendChild(gem);
+        if (newCells.has(r * COLS + c)) div.classList.add('drop-in');
+        div.appendChild(gem);
       } else {
-        cell.classList.add('empty');
+        div.classList.add('empty');
       }
-
-      cell.addEventListener('pointerdown', onPointerDown);
-      boardEl.appendChild(cell);
+      div.addEventListener('pointerdown', onPointerDown);
+      boardEl.appendChild(div);
     }
   }
   updateUI();
 }
 
-function getCell(r, c) {
-  return boardEl.children[r * COLS + c];
+function updateUI() {
+  scoreEl.textContent  = score.toLocaleString();
+  movesEl.textContent  = moves;
+  targetEl.textContent = target.toLocaleString();
+  hintCnt.textContent  = hints;
+  hiscoreEl.textContent = hiScore.toLocaleString();
+  progEl.style.width   = Math.min(100, (score / target) * 100) + '%';
 }
 
-function updateUI() {
-  scoreEl.textContent = score.toLocaleString();
-  movesEl.textContent = moves;
-  levelEl.textContent = level;
-  targetEl.textContent = target.toLocaleString();
-  hintCnt.textContent = hints;
-  hiscoreEl.textContent = hiScore.toLocaleString();
-  const pct = Math.min(100, (score / target) * 100);
-  progEl.style.width = pct + '%';
+// ── Cascade ────────────────────────────────────────────────────────────────
+
+async function cascade(combo) {
+  const matches = getMatches();
+  if (!matches.length) return;
+
+  // Flash
+  matches.forEach(([r, c]) => cell(r, c)?.classList.add('matching'));
+  await delay(300);
+
+  // Score
+  const pts = matches.length * 20 * combo;
+  score += pts;
+  showScorePop(matches[0], pts);
+
+  // Remove from data
+  matches.forEach(([r, c]) => { board[r][c] = null; });
+
+  // Drop & fill
+  const fresh = dropAndFill();
+  render(fresh);
+  await delay(380);
+
+  // Recurse
+  await cascade(combo + 1);
+}
+
+function showScorePop([r, c], pts) {
+  const el = cell(r, c);
+  if (!el) return;
+  const bRect = boardEl.getBoundingClientRect();
+  const cRect = el.getBoundingClientRect();
+  const pop = document.createElement('div');
+  pop.className = 'score-pop';
+  pop.textContent = '+' + pts;
+  pop.style.left = (cRect.left - bRect.left + cRect.width / 2) + 'px';
+  pop.style.top  = (cRect.top  - bRect.top) + 'px';
+  boardEl.style.position = 'relative';
+  boardEl.appendChild(pop);
+  pop.addEventListener('animationend', () => pop.remove());
 }
 
 // ── Input ──────────────────────────────────────────────────────────────────
@@ -613,7 +693,7 @@ function onPointerDown(e) {
   const c = +e.currentTarget.dataset.c;
   touchStart = { r, c, x: e.clientX, y: e.clientY };
   e.currentTarget.setPointerCapture(e.pointerId);
-  e.currentTarget.addEventListener('pointerup', onPointerUp, { once: true });
+  e.currentTarget.addEventListener('pointerup',   onPointerUp,   { once: true });
   e.currentTarget.addEventListener('pointermove', onPointerMove);
 }
 
@@ -621,16 +701,12 @@ function onPointerMove(e) {
   if (!touchStart) return;
   const dx = e.clientX - touchStart.x;
   const dy = e.clientY - touchStart.y;
-  const threshold = 20;
-  if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
+  if (Math.abs(dx) > 20 || Math.abs(dy) > 20) {
     e.currentTarget.removeEventListener('pointermove', onPointerMove);
     const { r, c } = touchStart;
     touchStart = null;
-    if (Math.abs(dx) > Math.abs(dy)) {
-      trySwap(r, c, r, c + (dx > 0 ? 1 : -1));
-    } else {
-      trySwap(r, c, r + (dy > 0 ? 1 : -1), c);
-    }
+    if (Math.abs(dx) > Math.abs(dy)) trySwap(r, c, r, c + (dx > 0 ? 1 : -1));
+    else                              trySwap(r, c, r + (dy > 0 ? 1 : -1), c);
   }
 }
 
@@ -646,15 +722,14 @@ function handleTap(r, c) {
   if (board[r][c] === null) return;
   if (!selected) {
     selected = { r, c };
-    getCell(r, c).classList.add('selected');
+    cell(r, c).classList.add('selected');
     return;
   }
   const { r: sr, c: sc } = selected;
-  getCell(sr, sc).classList.remove('selected');
+  cell(sr, sc).classList.remove('selected');
   selected = null;
   if (sr === r && sc === c) return;
-  const dr = Math.abs(r - sr), dc = Math.abs(c - sc);
-  if (dr + dc === 1) trySwap(sr, sc, r, c);
+  if (Math.abs(r - sr) + Math.abs(c - sc) === 1) trySwap(sr, sc, r, c);
 }
 
 async function trySwap(r1, c1, r2, c2) {
@@ -662,186 +737,87 @@ async function trySwap(r1, c1, r2, c2) {
   if (busy) return;
   busy = true;
 
-  const dir1 = r1===r2 ? (c2>c1?'right':'left') : (r2>r1?'down':'up');
-  const dir2 = r1===r2 ? (c2>c1?'left':'right') : (r2>r1?'up':'down');
+  const dir1 = r1 === r2 ? (c2 > c1 ? 'right' : 'left') : (r2 > r1 ? 'down' : 'up');
+  const dir2 = r1 === r2 ? (c2 > c1 ? 'left' : 'right') : (r2 > r1 ? 'up'   : 'down');
 
-  // Check validity BEFORE animating
-  swap(r1,c1,r2,c2);
-  const matches = findMatches();
+  // Test swap in data
+  swapCells(r1, c1, r2, c2);
+  const valid = getMatches().length > 0;
 
-  if (!matches.length) {
-    // Invalid — undo data immediately, show subtle bounce
-    swap(r1,c1,r2,c2);
-    getCell(r1,c1).classList.add('bounce-'+dir1);
-    getCell(r2,c2).classList.add('bounce-'+dir2);
+  if (!valid) {
+    // Undo and bounce
+    swapCells(r1, c1, r2, c2);
+    cell(r1, c1).classList.add('bounce-' + dir1);
+    cell(r2, c2).classList.add('bounce-' + dir2);
     await delay(320);
-    getCell(r1,c1).classList.remove('bounce-'+dir1);
-    getCell(r2,c2).classList.remove('bounce-'+dir2);
+    cell(r1, c1).classList.remove('bounce-' + dir1);
+    cell(r2, c2).classList.remove('bounce-' + dir2);
     busy = false;
     return;
   }
 
-  // Valid — animate the one-way slide, then immediately re-render with swapped data
-  getCell(r1,c1).classList.add('swap-'+dir1);
-  getCell(r2,c2).classList.add('swap-'+dir2);
+  // Animate slide then render swapped board, then cascade
+  cell(r1, c1).classList.add('swap-' + dir1);
+  cell(r2, c2).classList.add('swap-' + dir2);
   await delay(190);
 
   moves--;
-  render(); // redraws board with swapped positions — no snap-back
-  await processCascade(matches, 1);
-  render();
+  render();           // board now shows swapped state
+  await cascade(1);   // finds & clears matches, drops, fills, repeats
 
-  if (!hasMoves()) shuffleBoard();
+  if (!hasValidMove()) shuffleBoard();
 
   saveGame();
 
-  if (score >= target) {
-    showLevelComplete();
-  } else if (moves <= 0) {
-    showGameOver();
-  }
+  if (score >= target)  showLevelComplete();
+  else if (moves <= 0)  showGameOver();
 
   busy = false;
 }
 
-async function processCascade(matches, combo) {
-  if (!matches.length) return;
-
-  // Flash matches
-  matches.forEach(({r,c}) => {
-    getCell(r,c)?.classList.add('matching');
-  });
-  await delay(300);
-
-  // Score
-  const pts = matches.length * 20 * combo;
-  score += pts;
-  showScorePop(matches, pts);
-
-  // Remove
-  matches.forEach(({r,c}) => { board[r][c] = null; });
-  render();
-  await delay(150);
-
-  // Gravity
-  await dropGems();
-
-  // Fill
-  const newCells = fillTop();
-  render(new Set(), newCells);
-  await delay(350);
-
-  // Check cascades
-  const next = findMatches();
-  if (next.length) await processCascade(next, combo + 1);
-}
-
-async function dropGems() {
-  for (let c = 0; c < COLS; c++) {
-    let empty = ROWS - 1;
-    for (let r = ROWS - 1; r >= 0; r--) {
-      if (board[r][c] !== null) {
-        board[empty][c] = board[r][c];
-        if (empty !== r) board[r][c] = null;
-        empty--;
-      }
-    }
-  }
-}
-
-function fillTop() {
-  const newCells = new Set();
-  for (let c = 0; c < COLS; c++) {
-    for (let r = 0; r < ROWS; r++) {
-      if (board[r][c] === null) {
-        board[r][c] = rand(GEM_TYPES);
-        newCells.add(r * COLS + c);
-      }
-    }
-  }
-  return newCells;
-}
-
-function showScorePop(matches, pts) {
-  const first = matches[0];
-  const cell = getCell(first.r, first.c);
-  if (!cell) return;
-  const rect = cell.getBoundingClientRect();
-  const wrap = document.getElementById('board-wrap');
-  const wRect = wrap.getBoundingClientRect();
-  const pop = document.createElement('div');
-  pop.className = 'score-pop';
-  pop.textContent = '+' + pts;
-  pop.style.left = (rect.left - wRect.left) + 'px';
-  pop.style.top  = (rect.top  - wRect.top)  + 'px';
-  wrap.appendChild(pop);
-  pop.addEventListener('animationend', () => pop.remove());
-}
-
-// ── Shuffle ────────────────────────────────────────────────────────────────
-
-function shuffleBoard() {
-  const flat = board.flat().filter(g => g !== null);
-  for (let i = flat.length - 1; i > 0; i--) {
-    const j = rand(i + 1);
-    [flat[i], flat[j]] = [flat[j], flat[i]];
-  }
-  let idx = 0;
-  for (let r = 0; r < ROWS; r++)
-    for (let c = 0; c < COLS; c++)
-      board[r][c] = flat[idx++];
-
-  if (!hasMoves()) shuffleBoard();
-}
-
-// ── Hints ──────────────────────────────────────────────────────────────────
+// ── Hint ───────────────────────────────────────────────────────────────────
 
 function showHint() {
   if (hints <= 0 || busy) return;
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
-      if (c < COLS-1) {
-        swap(r,c,r,c+1);
-        if (findMatches().length) {
-          swap(r,c,r,c+1);
+      const pairs = [[r, c, r, c+1], [r, c, r+1, c]];
+      for (const [r1, c1, r2, c2] of pairs) {
+        if (r2 >= ROWS || c2 >= COLS) continue;
+        swapCells(r1, c1, r2, c2);
+        const ok = getMatches().length > 0;
+        swapCells(r1, c1, r2, c2);
+        if (ok) {
           hints--;
           hintCnt.textContent = hints;
-          const c1 = getCell(r,c), c2 = getCell(r,c+1);
-          c1.classList.add('hint'); c2.classList.add('hint');
-          setTimeout(() => { c1.classList.remove('hint'); c2.classList.remove('hint'); }, 2500);
+          [cell(r1,c1), cell(r2,c2)].forEach(el => {
+            el.classList.add('hint');
+            setTimeout(() => el.classList.remove('hint'), 2500);
+          });
           return;
         }
-        swap(r,c,r,c+1);
-      }
-      if (r < ROWS-1) {
-        swap(r,c,r+1,c);
-        if (findMatches().length) {
-          swap(r,c,r+1,c);
-          hints--;
-          hintCnt.textContent = hints;
-          const c1 = getCell(r,c), c2 = getCell(r+1,c);
-          c1.classList.add('hint'); c2.classList.add('hint');
-          setTimeout(() => { c1.classList.remove('hint'); c2.classList.remove('hint'); }, 2500);
-          return;
-        }
-        swap(r,c,r+1,c);
       }
     }
   }
 }
 
-// ── Level complete / Game over ─────────────────────────────────────────────
+// ── Overlays ───────────────────────────────────────────────────────────────
+
+function checkHiScore() {
+  if (score > hiScore) { hiScore = score; saveHiScore(); return true; }
+  return false;
+}
 
 function showLevelComplete() {
   const isNew = checkHiScore();
   const stars = score >= target * 1.5 ? '★★★' : score >= target * 1.2 ? '★★☆' : '★☆☆';
   document.getElementById('ol-title').textContent = 'Level Complete!';
   document.getElementById('ol-stars').textContent = stars;
-  document.getElementById('ol-sub').textContent = 'Score';
+  document.getElementById('ol-sub').textContent   = 'Score';
   document.getElementById('ol-score').textContent = score.toLocaleString();
   document.getElementById('ol-hiscore-wrap').style.display = isNew ? 'block' : 'none';
-  document.getElementById('ol-btn').textContent = 'Next Level ›';
-  document.getElementById('ol-btn').onclick = nextLevel;
+  document.getElementById('ol-btn').textContent   = 'Next Level ›';
+  document.getElementById('ol-btn').onclick       = nextLevel;
   overlay.classList.add('show');
   updateUI();
 }
@@ -850,11 +826,11 @@ function showGameOver() {
   const isNew = checkHiScore();
   document.getElementById('ol-title').textContent = 'No More Moves';
   document.getElementById('ol-stars').textContent = '💔';
-  document.getElementById('ol-sub').textContent = 'Final Score';
+  document.getElementById('ol-sub').textContent   = 'Final Score';
   document.getElementById('ol-score').textContent = score.toLocaleString();
   document.getElementById('ol-hiscore-wrap').style.display = isNew ? 'block' : 'none';
-  document.getElementById('ol-btn').textContent = 'Try Again';
-  document.getElementById('ol-btn').onclick = newGame;
+  document.getElementById('ol-btn').textContent   = 'Try Again';
+  document.getElementById('ol-btn').onclick       = newGame;
   overlay.classList.add('show');
   updateUI();
 }
@@ -863,9 +839,9 @@ function nextLevel() {
   overlay.classList.remove('show');
   level++;
   target = Math.round(target * 2.0);
-  moves = 30 + Math.min(level * 2, 20);
-  hints = 3;
-  initBoard();
+  moves  = 30 + Math.min(level * 2, 20);
+  hints  = 3;
+  newBoard();
   render();
   saveGame();
 }
@@ -874,62 +850,31 @@ function newGame() {
   overlay.classList.remove('show');
   score = 0; level = 1; target = 2000; moves = 30; hints = 3; selected = null;
   clearSave();
-  initBoard();
+  newBoard();
   render();
 }
 
-function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-// ── Save / Load ─────────────────────────────────────────────────────────────
-
-const SAVE_KEY = 'fruitCascade_save';
-const HI_KEY  = 'fruitCascade_hi';
+// ── Persistence ────────────────────────────────────────────────────────────
 
 function saveGame() {
-  try {
-    const state = { board, score, level, moves, hints, target };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(state));
-  } catch(e) {}
-}
-
-function loadHiScore() {
-  try { hiScore = parseInt(localStorage.getItem(HI_KEY) || '0', 10) || 0; } catch(e) {}
-}
-
-function saveHiScore() {
-  try { localStorage.setItem(HI_KEY, hiScore); } catch(e) {}
-}
-
-function checkHiScore() {
-  if (score > hiScore) {
-    hiScore = score;
-    saveHiScore();
-    return true;
-  }
-  return false;
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ board, score, level, moves, hints, target })); } catch(e) {}
 }
 
 function loadGame() {
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return false;
-    const s = JSON.parse(raw);
-    if (!s.board || s.board.length !== ROWS) return false;
-    board  = s.board;
-    score  = s.score  ?? 0;
-    level  = s.level  ?? 1;
-    moves  = s.moves  ?? 30;
-    hints  = s.hints  ?? 3;
-    target = s.target ?? 2000;
+    const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+    if (!s || !Array.isArray(s.board) || s.board.length !== ROWS) return false;
+    board = s.board; score = s.score ?? 0; level = s.level ?? 1;
+    moves = s.moves ?? 30; hints = s.hints ?? 3; target = s.target ?? 2000;
     return true;
   } catch(e) { return false; }
 }
 
-function clearSave() {
-  try { localStorage.removeItem(SAVE_KEY); } catch(e) {}
-}
+function clearSave()    { try { localStorage.removeItem(SAVE_KEY); } catch(e) {} }
+function saveHiScore()  { try { localStorage.setItem(HI_KEY, hiScore); } catch(e) {} }
+function loadHiScore()  { try { hiScore = parseInt(localStorage.getItem(HI_KEY) || '0', 10) || 0; } catch(e) {} }
 
-// ── Init ───────────────────────────────────────────────────────────────────
+// ── Boot ───────────────────────────────────────────────────────────────────
 
 document.getElementById('new-btn').addEventListener('click', newGame);
 document.getElementById('hint-btn').addEventListener('click', showHint);
@@ -940,23 +885,12 @@ document.getElementById('shuffle-btn').addEventListener('click', () => {
   saveGame();
 });
 
-// Auto-save after every move
-const _origTrySwap = trySwap;
-// (save is called explicitly inside trySwap and cascade end)
-
 loadHiScore();
-if (loadGame()) {
-  render();
-} else {
-  initBoard();
-  render();
-}
+if (loadGame()) render();
+else { newBoard(); render(); }
 
-// Register service worker for PWA
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
-  });
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
 }
 </script>
 </body>
