@@ -149,7 +149,13 @@
       color: var(--gold);
       line-height: 1;
     }
-    #moves-val { color: var(--silver); }
+    #moves-val { color: var(--silver); transition: color 0.3s; }
+    #moves-val.warn  { color: var(--topaz); }
+    #moves-val.danger { color: var(--ruby); animation: flash-danger 0.6s ease-in-out infinite alternate; }
+    @keyframes flash-danger {
+      from { color: var(--ruby); text-shadow: none; }
+      to   { color: #ff6680; text-shadow: 0 0 12px rgba(255,45,85,0.9); }
+    }
 
     /* Progress bar */
     .progress-wrap {
@@ -380,10 +386,12 @@
       color: var(--gold-glow);
       margin-bottom: 24px;
     }
-    .stars {
-      font-size: 2rem;
+    .overlay-moves {
+      font-size: 0.75rem;
+      color: var(--dim);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
       margin-bottom: 20px;
-      letter-spacing: 0.2em;
     }
     .overlay-btn {
       width: 100%;
@@ -412,6 +420,78 @@
       :root { --cell: 38px; --gap: 2px; }
       .gem { width: 33px; height: 33px; font-size: 23px; }
     }
+
+    /* Monkey */
+    #monkey-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      height: 52px;
+      position: relative;
+      width: 100%;
+    }
+    #monkey {
+      font-size: 2.4rem;
+      line-height: 1;
+      transition: transform 0.15s ease;
+      display: inline-block;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+    }
+    #monkey.chomp {
+      animation: monkey-chomp 0.5s ease forwards;
+    }
+    @keyframes monkey-chomp {
+      0%   { transform: scale(1) rotate(0deg); }
+      20%  { transform: scale(1.35) rotate(-12deg); }
+      45%  { transform: scale(1.25) rotate(10deg); }
+      70%  { transform: scale(1.15) rotate(-6deg); }
+      100% { transform: scale(1) rotate(0deg); }
+    }
+    #monkey.idle {
+      animation: monkey-idle 2.5s ease-in-out infinite;
+    }
+    @keyframes monkey-idle {
+      0%,100% { transform: translateY(0) rotate(0deg); }
+      30%     { transform: translateY(-3px) rotate(-4deg); }
+      70%     { transform: translateY(-1px) rotate(3deg); }
+    }
+    #monkey-fruit {
+      font-size: 1.6rem;
+      line-height: 1;
+      min-width: 28px;
+      text-align: left;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    #monkey-fruit.show {
+      animation: fruit-appear 0.9s ease forwards;
+    }
+    @keyframes fruit-appear {
+      0%   { opacity: 0; transform: translateX(-10px) scale(0.5); }
+      25%  { opacity: 1; transform: translateX(0) scale(1.2); }
+      60%  { opacity: 1; transform: scale(1); }
+      100% { opacity: 0; transform: scale(0.3) translateX(20px); }
+    }
+    #monkey-speech {
+      font-family: 'Cinzel', serif;
+      font-size: 0.65rem;
+      color: var(--gold);
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      min-width: 60px;
+    }
+    #monkey-speech.show {
+      animation: speech-pop 1.4s ease forwards;
+    }
+    @keyframes speech-pop {
+      0%   { opacity: 0; transform: translateY(4px); }
+      20%  { opacity: 1; transform: translateY(0); }
+      75%  { opacity: 1; }
+      100% { opacity: 0; transform: translateY(-8px); }
+    }
+
   </style>
 </head>
 <body>
@@ -448,6 +528,12 @@
     <div id="board"></div>
   </div>
 
+  <div id="monkey-wrap">
+    <div id="monkey-fruit"></div>
+    <div id="monkey">🐒</div>
+    <div id="monkey-speech"></div>
+  </div>
+
   <div class="actions">
     <button class="btn" id="hint-btn">💡 Hint<span id="hint-count">3</span></button>
     <button class="btn primary" id="new-btn">✦ New Game</button>
@@ -458,7 +544,7 @@
 <div id="overlay">
   <div class="overlay-card">
     <div class="overlay-title" id="ol-title">Level Complete!</div>
-    <div class="stars" id="ol-stars">★★★</div>
+    <div class="overlay-moves" id="ol-moves"></div>
     <div class="overlay-sub" id="ol-sub">Score</div>
     <div class="overlay-score" id="ol-score">0</div>
     <div id="ol-hiscore-wrap" style="font-size:0.7rem;color:var(--gold);letter-spacing:0.12em;margin:-12px 0 16px;display:none">🏆 NEW BEST!</div>
@@ -469,7 +555,7 @@
 <script>
 const COLS = 8, ROWS = 8;
 const GEM_TYPES = 7;
-const GEM_EMOJI = ['🍓','🍇','🍏','🍋','🍊','🍒','🍉'];
+const GEM_EMOJI = ['🍉','🍇','🍏','🍌','🍊','🍑','🫐'];
 
 const SAVE_KEY = 'fruitCascade_save';
 const HI_KEY   = 'fruitCascade_hi';
@@ -583,6 +669,33 @@ function shuffleBoard() {
   if (!hasValidMove()) shuffleBoard();
 }
 
+function safeRandom(r, c) {
+  // Try each possible gem type and reject any that would form a 3-in-a-row
+  // by temporarily placing it and checking matches in its neighbourhood only.
+  const candidates = [];
+  for (let g = 0; g < GEM_TYPES; g++) {
+    board[r][c] = g;
+    // Check horizontal runs touching this cell
+    let hOk = true;
+    const hStart = Math.max(0, c - 2);
+    const hEnd   = Math.min(COLS - 3, c);
+    for (let cc = hStart; cc <= hEnd; cc++) {
+      if (board[r][cc] !== null && board[r][cc] === board[r][cc+1] && board[r][cc] === board[r][cc+2]) { hOk = false; break; }
+    }
+    // Check vertical runs touching this cell
+    let vOk = true;
+    const vStart = Math.max(0, r - 2);
+    const vEnd   = Math.min(ROWS - 3, r);
+    for (let rr = vStart; rr <= vEnd; rr++) {
+      if (board[rr][c] !== null && board[rr][c] === board[rr+1][c] && board[rr][c] === board[rr+2][c]) { vOk = false; break; }
+    }
+    if (hOk && vOk) candidates.push(g);
+    board[r][c] = null;
+  }
+  // Pick randomly from safe candidates; fall back to full random if none (shouldn't happen)
+  return candidates.length ? candidates[rnd(candidates.length)] : rnd(GEM_TYPES);
+}
+
 function dropAndFill() {
   const newCells = new Set();
   for (let c = 0; c < COLS; c++) {
@@ -595,9 +708,10 @@ function dropAndFill() {
         empty--;
       }
     }
-    // Fill top
+    // Fill top with match-safe gems (fill top-to-bottom so each cell can
+    // see the ones above it already placed)
     for (let r = 0; r <= empty; r++) {
-      board[r][c] = rnd(GEM_TYPES);
+      board[r][c] = safeRandom(r, c);
       newCells.add(r * COLS + c);
     }
   }
@@ -636,6 +750,8 @@ function render(newCells = new Set()) {
 function updateUI() {
   scoreEl.textContent  = score.toLocaleString();
   movesEl.textContent  = moves;
+  movesEl.classList.toggle('warn',   moves <= 10 && moves > 5);
+  movesEl.classList.toggle('danger', moves <= 5);
   targetEl.textContent = target.toLocaleString();
   hintCnt.textContent  = hints;
   hiscoreEl.textContent = hiScore.toLocaleString();
@@ -648,25 +764,73 @@ async function cascade(combo) {
   const matches = getMatches();
   if (!matches.length) return;
 
-  // Flash
+  // Mark all matched cells in the DOM simultaneously, then wait for the
+  // full flash animation before touching the board data or re-rendering.
   matches.forEach(([r, c]) => cell(r, c)?.classList.add('matching'));
-  await delay(300);
+  await delay(420); // long enough for flash-match (0.3s) to fully complete
 
   // Score
   const pts = matches.length * 20 * combo;
   score += pts;
   showScorePop(matches[0], pts);
+  updateUI();
+  monkeyEat(matches, combo);
 
-  // Remove from data
+  // Remove from board data only after animation is done
   matches.forEach(([r, c]) => { board[r][c] = null; });
 
-  // Drop & fill
+  // Render the gaps (nulls show as empty cells) so player sees them clear
+  render();
+  await delay(80);
+
+  // Drop existing fruit down and fill top with new fruit
   const fresh = dropAndFill();
   render(fresh);
-  await delay(380);
+  await delay(400);
 
-  // Recurse
+  // Check for cascade
   await cascade(combo + 1);
+}
+
+const MONKEY_PHRASES = [
+  'Yum!', 'Mmm!', 'Oo oo!', 'Delish!', 'More!',
+  'Tasty!', 'Ooh ah!', 'Nom!', 'Yes!', 'Combo!'
+];
+let monkeyTimer = null;
+
+function monkeyEat(matches, combo) {
+  const monkeyEl  = document.getElementById('monkey');
+  const fruitEl   = document.getElementById('monkey-fruit');
+  const speechEl  = document.getElementById('monkey-speech');
+
+  // Pick a fruit from the matched set to show
+  const [r, c] = matches[Math.floor(Math.random() * matches.length)];
+  const g = board[r] && board[r][c] != null ? board[r][c] : null;
+  fruitEl.textContent = g !== null ? GEM_EMOJI[g] : GEM_EMOJI[Math.floor(Math.random() * GEM_TYPES)];
+
+  // Pick phrase — extra excitement for combos
+  const phrase = combo >= 3 ? '🔥 Combo!' :
+                 combo === 2 ? 'Again!' :
+                 MONKEY_PHRASES[Math.floor(Math.random() * MONKEY_PHRASES.length)];
+  speechEl.textContent = phrase;
+
+  // Restart animations cleanly
+  monkeyEl.classList.remove('idle', 'chomp');
+  fruitEl.classList.remove('show');
+  speechEl.classList.remove('show');
+  void monkeyEl.offsetWidth; // force reflow
+
+  monkeyEl.classList.add('chomp');
+  fruitEl.classList.add('show');
+  speechEl.classList.add('show');
+
+  if (monkeyTimer) clearTimeout(monkeyTimer);
+  monkeyTimer = setTimeout(() => {
+    monkeyEl.classList.remove('chomp');
+    monkeyEl.classList.add('idle');
+    fruitEl.classList.remove('show');
+    speechEl.classList.remove('show');
+  }, 1000);
 }
 
 function showScorePop([r, c], pts) {
@@ -765,7 +929,7 @@ async function trySwap(r1, c1, r2, c2) {
   render();           // board now shows swapped state
   await cascade(1);   // finds & clears matches, drops, fills, repeats
 
-  if (!hasValidMove()) shuffleBoard();
+  if (!hasValidMove()) { shuffleBoard(); render(); }
 
   saveGame();
 
@@ -810,9 +974,10 @@ function checkHiScore() {
 
 function showLevelComplete() {
   const isNew = checkHiScore();
-  const stars = score >= target * 1.5 ? '★★★' : score >= target * 1.2 ? '★★☆' : '★☆☆';
+  const maxMoves = 30 + Math.min((level - 1) * 2, 20);
+  const used = maxMoves - moves;
   document.getElementById('ol-title').textContent = 'Level Complete!';
-  document.getElementById('ol-stars').textContent = stars;
+  document.getElementById('ol-moves').textContent = used + ' move' + (used === 1 ? '' : 's') + ' used';
   document.getElementById('ol-sub').textContent   = 'Score';
   document.getElementById('ol-score').textContent = score.toLocaleString();
   document.getElementById('ol-hiscore-wrap').style.display = isNew ? 'block' : 'none';
@@ -824,8 +989,10 @@ function showLevelComplete() {
 
 function showGameOver() {
   const isNew = checkHiScore();
+  const maxMoves = 30 + Math.min((level - 1) * 2, 20);
+  const used = maxMoves - moves;
   document.getElementById('ol-title').textContent = 'No More Moves';
-  document.getElementById('ol-stars').textContent = '💔';
+  document.getElementById('ol-moves').textContent = used + ' move' + (used === 1 ? '' : 's') + ' used';
   document.getElementById('ol-sub').textContent   = 'Final Score';
   document.getElementById('ol-score').textContent = score.toLocaleString();
   document.getElementById('ol-hiscore-wrap').style.display = isNew ? 'block' : 'none';
@@ -888,6 +1055,7 @@ document.getElementById('shuffle-btn').addEventListener('click', () => {
 loadHiScore();
 if (loadGame()) render();
 else { newBoard(); render(); }
+document.getElementById('monkey').classList.add('idle');
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
