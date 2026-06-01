@@ -493,58 +493,29 @@
     }
 
 
-    /* Special fruit */
-    .gem.striped-h::after, .gem.striped-v::after { display: block; }
-    .gem.striped-h {
-      position: relative;
+    /* Special (glowing) fruit */
+    .gem.glowing {
+      animation: glow-pulse 0.9s ease-in-out infinite alternate;
+      border-radius: 50%;
     }
-    .gem.striped-h::after {
-      content: '↔';
-      position: absolute;
-      bottom: -4px; right: -2px;
-      font-size: 11px;
-      line-height: 1;
-      background: rgba(0,0,0,0.55);
-      border-radius: 4px;
-      padding: 0 2px;
-      color: #fff;
-      pointer-events: none;
+    @keyframes glow-pulse {
+      from {
+        filter: drop-shadow(0 0 4px #fff) drop-shadow(0 0 8px currentColor);
+        transform: scale(1);
+      }
+      to {
+        filter: drop-shadow(0 0 10px #fff) drop-shadow(0 0 20px #ffe066) drop-shadow(0 0 30px #ff8c00);
+        transform: scale(1.12);
+      }
     }
-    .gem.striped-v {
-      position: relative;
-    }
-    .gem.striped-v::after {
-      content: '↕';
-      position: absolute;
-      bottom: -4px; right: -2px;
-      font-size: 11px;
-      line-height: 1;
-      background: rgba(0,0,0,0.55);
-      border-radius: 4px;
-      padding: 0 2px;
-      color: #fff;
-      pointer-events: none;
-    }
-    .gem.bomb {
-      position: relative;
-    }
-    .gem.bomb::after {
-      content: '💥';
-      position: absolute;
-      bottom: -6px; right: -4px;
-      font-size: 13px;
-      line-height: 1;
-      pointer-events: none;
-      display: block;
-    }
-    /* Special fruit flash — brighter */
+    /* Special fruit flash — big burst */
     .cell.matching-special .gem {
-      animation: flash-special 0.4s ease forwards;
+      animation: flash-special 0.45s ease forwards;
     }
     @keyframes flash-special {
-      0%   { transform: scale(1); opacity: 1; }
-      30%  { transform: scale(1.5); filter: brightness(3) saturate(2); opacity: 1; }
-      100% { transform: scale(0); opacity: 0; }
+      0%   { transform: scale(1);   opacity: 1; filter: none; }
+      35%  { transform: scale(1.6); opacity: 1; filter: brightness(4) saturate(2) drop-shadow(0 0 16px #ffe066); }
+      100% { transform: scale(0);   opacity: 0; }
     }
 
 
@@ -659,7 +630,7 @@ const SAVE_KEY = 'fruitCascade_save';
 const HI_KEY   = 'fruitCascade_hi';
 
 let board = [];
-let special = []; // parallel board: null | 'striped-h' | 'striped-v' | 'bomb'
+let special = []; // parallel board: null | 'glowing'
 let score = 0, level = 1, moves = 30, target = 2000, hiScore = 0, hints = 3;
 let selected = null, busy = false, touchStart = null;
 let comboTimer = null;
@@ -854,7 +825,7 @@ function render(newCells = new Set()) {
         const gem = document.createElement('div');
         gem.className = 'gem gem-' + g;
         gem.textContent = GEM_EMOJI[g];
-        if (special[r] && special[r][c]) gem.classList.add(special[r][c]);
+        if (special[r] && special[r][c]) gem.classList.add('glowing');
         if (newCells.has(r * COLS + c)) div.classList.add('drop-in');
         div.appendChild(gem);
       } else {
@@ -908,14 +879,8 @@ function collectClear(initialCells) {
     if (toNull.has(key)) continue;
     toNull.add(key);
     const sp = special[r] && special[r][c];
-    if (sp === 'striped-h') {
-      // clear whole row
-      for (let cc = 0; cc < COLS; cc++) queue.push([r, cc]);
-    } else if (sp === 'striped-v') {
-      // clear whole column
-      for (let rr = 0; rr < ROWS; rr++) queue.push([rr, c]);
-    } else if (sp === 'bomb') {
-      // clear 3x3
+    if (sp === 'glowing') {
+      // 3x3 blast
       for (let dr = -1; dr <= 1; dr++)
         for (let dc = -1; dc <= 1; dc++)
           if (r+dr >= 0 && r+dr < ROWS && c+dc >= 0 && c+dc < COLS)
@@ -937,15 +902,10 @@ async function cascade(combo) {
   const newSpecials = []; // [{r,c,kind,gemType}]
   for (const grp of groups) {
     const { len, dir, pivot, gemType } = grp;
-    // Only create specials from plain (non-special) matches
+    // Match 4+ creates a glowing fruit (3x3 blast when matched)
     const hasSpecialInGroup = grp.cells.some(([r,c]) => special[r][c]);
-    if (!hasSpecialInGroup) {
-      if (len === 4) {
-        // Striped: direction perpendicular to match direction
-        newSpecials.push({ r: pivot[0], c: pivot[1], kind: dir === 'h' ? 'striped-v' : 'striped-h', gemType });
-      } else if (len >= 5) {
-        newSpecials.push({ r: pivot[0], c: pivot[1], kind: 'bomb', gemType });
-      }
+    if (!hasSpecialInGroup && len >= 4) {
+      newSpecials.push({ r: pivot[0], c: pivot[1], kind: 'glowing', gemType });
     }
   }
 
