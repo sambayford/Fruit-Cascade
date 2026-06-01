@@ -900,10 +900,35 @@ async function cascade(combo) {
 
   // Determine where to place special fruit (before clearing)
   const newSpecials = []; // [{r,c,kind,gemType}]
-  for (const grp of groups) {
-    const { len, dir, pivot, gemType } = grp;
-    // Match 4+ creates a glowing fruit (3x3 blast when matched)
-    const hasSpecialInGroup = grp.cells.some(([r,c]) => special[r][c]);
+  const usedGroups = new Set();
+
+  // Check for L/T shapes: two groups of the same fruit type that share a cell
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = i + 1; j < groups.length; j++) {
+      const a = groups[i], b = groups[j];
+      if (a.gemType !== b.gemType) continue;
+      if (a.dir === b.dir) continue; // must be perpendicular
+      const hasSpecial = [...a.cells, ...b.cells].some(([r,c]) => special[r][c]);
+      if (hasSpecial) continue;
+      // Find shared cell (the corner of the L)
+      const bSet = new Set(b.cells.map(([r,c]) => r*COLS+c));
+      const shared = a.cells.find(([r,c]) => bSet.has(r*COLS+c));
+      if (shared) {
+        const totalCells = new Set([...a.cells, ...b.cells].map(([r,c]) => r*COLS+c));
+        if (totalCells.size >= 5) {
+          newSpecials.push({ r: shared[0], c: shared[1], kind: 'glowing', gemType: a.gemType });
+          usedGroups.add(i);
+          usedGroups.add(j);
+        }
+      }
+    }
+  }
+
+  // Remaining groups: straight match of 4+
+  for (let i = 0; i < groups.length; i++) {
+    if (usedGroups.has(i)) continue;
+    const { len, pivot, gemType, cells } = groups[i];
+    const hasSpecialInGroup = cells.some(([r,c]) => special[r][c]);
     if (!hasSpecialInGroup && len >= 4) {
       newSpecials.push({ r: pivot[0], c: pivot[1], kind: 'glowing', gemType });
     }
