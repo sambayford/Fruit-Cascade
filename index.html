@@ -989,6 +989,10 @@ async function cascade(combo) {
   const flyCells = clearCells.filter(([r,c]) => !pivotSet.has(r*COLS+c));
   const capturedTypes = flyCells.map(([r,c]) => board[r][c] ?? 0);
 
+  // Sound effect — special activations get bigger sound
+  const hasSpecialClear = clearCells.some(([r,c]) => special[r][c] === 'glowing');
+  if (hasSpecialClear) sfxSpecialActivate(); else sfxMatch(combo);
+
   // Hide matched cells — but NOT pivot cells (they stay visible and become glowing)
   clearCells.forEach(([r, c]) => {
     if (pivotSet.has(r*COLS+c)) return;
@@ -996,7 +1000,8 @@ async function cascade(combo) {
     if (!el) return;
     el.classList.add(special[r][c] ? 'matching-special' : 'matching');
   });
-  // Immediately mark pivot cells as glowing so they pulse in place during the animation
+  // Immediately mark pivot cells as glowing
+  if (pivotSet.size > 0) sfxGlowing();
   pivotSet.forEach(key => {
     const r = Math.floor(key/COLS), c = key%COLS;
     const el = cell(r, c);
@@ -1268,6 +1273,7 @@ async function trySwap(r1, c1, r2, c2) {
   if (!valid) {
     // Undo and bounce
     swapCells(r1, c1, r2, c2);
+    sfxInvalid();
     cell(r1, c1).classList.add('bounce-' + dir1);
     cell(r2, c2).classList.add('bounce-' + dir2);
     await delay(320);
@@ -1278,6 +1284,7 @@ async function trySwap(r1, c1, r2, c2) {
   }
 
   // Animate slide then render swapped board, then cascade
+  sfxSwap();
   cell(r1, c1).classList.add('swap-' + dir1);
   cell(r2, c2).classList.add('swap-' + dir2);
   await delay(190);
@@ -1332,6 +1339,7 @@ function checkBestLevel() {
 }
 
 function showLevelComplete() {
+  sfxLevelComplete();
   const isNew = checkBestLevel();
   document.getElementById('ol-title').textContent = 'Level Complete!';
   document.getElementById('ol-moves').textContent = movesUsed + ' move' + (movesUsed === 1 ? '' : 's') + ' used';
@@ -1355,6 +1363,7 @@ function retryLevel() {
 }
 
 function showGameOver() {
+  sfxGameOver();
   document.getElementById('ol-title').textContent = 'No More Moves';
   document.getElementById('ol-moves').textContent = movesUsed + ' move' + (movesUsed === 1 ? '' : 's') + ' used';
   document.getElementById('ol-hiscore-wrap').style.display = 'none';
@@ -1412,6 +1421,83 @@ function loadBestLevel() { try { bestLevel = parseInt(localStorage.getItem(BEST_
 // ── Boot ───────────────────────────────────────────────────────────────────
 
 
+
+
+// ── Audio ──────────────────────────────────────────────────────────────────
+
+let audioCtx = null;
+
+function getAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+function playTone(opts) {
+  try {
+    const ctx  = getAudio();
+    const { type='sine', freq=440, freq2=freq, duration=0.15, vol=0.3, attack=0.005, decay=0.05, release=0.08, delay=0 } = opts;
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = type;
+    const t = ctx.currentTime + delay;
+    osc.frequency.setValueAtTime(freq, t);
+    if (freq2 !== freq) osc.frequency.exponentialRampToValueAtTime(freq2, t + duration);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(vol, t + attack);
+    gain.gain.exponentialRampToValueAtTime(vol * 0.6, t + attack + decay);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + duration + release);
+    osc.start(t);
+    osc.stop(t + duration + release + 0.05);
+  } catch(e) {}
+}
+
+function sfxSwap() {
+  playTone({ type:'sine',    freq:320, freq2:480, duration:0.12, vol:0.18, release:0.05 });
+}
+
+function sfxInvalid() {
+  playTone({ type:'sawtooth', freq:180, freq2:120, duration:0.12, vol:0.15, release:0.08 });
+}
+
+function sfxMatch(combo) {
+  // Ascending pitch per combo level
+  const base = 440 + (combo - 1) * 80;
+  [0, 0.06, 0.12].forEach((d, i) => {
+    playTone({ type:'sine', freq: base * [1, 1.26, 1.5][i], duration:0.14, vol:0.22, attack:0.005, decay:0.04, release:0.07, delay: d });
+  });
+}
+
+function sfxGlowing() {
+  // Sparkling sweep
+  [0, 0.04, 0.08, 0.12].forEach((d, i) => {
+    playTone({ type:'sine', freq:600 + i*200, freq2:900 + i*150, duration:0.18, vol:0.18, release:0.1, delay:d });
+  });
+}
+
+
+function sfxLevelComplete() {
+  // Ascending fanfare
+  [0, 0.12, 0.24, 0.38].forEach((d, i) => {
+    playTone({ type:'sine', freq:[523, 659, 784, 1047][i], duration:0.22, vol:0.28, attack:0.01, decay:0.08, release:0.15, delay:d });
+  });
+}
+
+function sfxGameOver() {
+  // Descending wah-wah
+  [0, 0.15, 0.3].forEach((d, i) => {
+    playTone({ type:'sawtooth', freq:[330, 261, 196][i], duration:0.25, vol:0.2, attack:0.01, decay:0.1, release:0.12, delay:d });
+  });
+}
+
+
+function sfxSpecialActivate() {
+  // Big whoosh
+  playTone({ type:'sine', freq:150, freq2:600, duration:0.3, vol:0.3, attack:0.01, release:0.2 });
+  playTone({ type:'sine', freq:600, freq2:1200, duration:0.25, vol:0.2, attack:0.05, release:0.15, delay:0.05 });
+}
 
 loadBestLevel();
 if (loadGame()) render();
