@@ -629,7 +629,7 @@
   <div class="actions">
     <div class="stat-box" style="flex:1">
       <div class="stat-label">Moves Left</div>
-      <div class="stat-value" id="moves-used-val">10</div>
+      <div class="stat-value" id="moves-used-val">5</div>
     </div>
   </div>
 </div>
@@ -653,7 +653,7 @@ const BEST_KEY = 'fruitCascade_best';
 
 let board = [];
 let special = []; // parallel board: null | 'glowing'
-let level = 1, moves = 10, movesUsed = 0, bestLevel = 1, hints = 3;
+let level = 1, moves = 5, baseMoves = 5, movesUsed = 0, bestLevel = 1, hints = 3;
 let lastSwapped = null;
 let fruitTargets = [], fruitCollected = [];
 let selected = null, busy = false, touchStart = null;
@@ -1352,8 +1352,9 @@ function showLevelComplete() {
 
 function retryLevel() {
   overlay.classList.remove('show');
-  // Reset moves and collection but keep the board as-is
-  moves     = moves + 5;
+  // Add 5 to the base allocation for this level
+  baseMoves = baseMoves + 5;
+  moves     = baseMoves;
   movesUsed = 0;
   hints     = 3;
   initTargets();
@@ -1376,6 +1377,7 @@ function showGameOver() {
 function nextLevel() {
   overlay.classList.remove('show');
   level++;
+  moves = baseMoves; // same allocation as previous level
   movesUsed = 0;
   hints  = 3;
   initTargets();
@@ -1387,7 +1389,7 @@ function nextLevel() {
 
 function newGame() {
   overlay.classList.remove('show');
-  level = 1; moves = 10; movesUsed = 0; hints = 3; selected = null;
+  level = 1; moves = 5; baseMoves = 5; movesUsed = 0; hints = 3; selected = null;
   initTargets();
   clearSave();
   newBoard();
@@ -1397,7 +1399,7 @@ function newGame() {
 // ── Persistence ────────────────────────────────────────────────────────────
 
 function saveGame() {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ board, special, level, moves, movesUsed, hints, fruitTargets, fruitCollected })); } catch(e) {}
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ board, special, level, moves, baseMoves, movesUsed, hints, fruitTargets, fruitCollected })); } catch(e) {}
 }
 
 function loadGame() {
