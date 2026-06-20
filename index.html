@@ -1407,7 +1407,7 @@ function loadGame() {
     const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
     if (!s || !Array.isArray(s.board) || s.board.length !== ROWS) return false;
     board = s.board; level = s.level ?? 1;
-    moves = s.moves ?? 10; movesUsed = s.movesUsed ?? 0; hints = s.hints ?? 3;
+    moves = s.moves ?? 5; baseMoves = s.baseMoves ?? s.moves ?? 5; movesUsed = s.movesUsed ?? 0; hints = s.hints ?? 3;
     special = s.special ?? board.map(row => row.map(() => null));
     fruitTargets   = s.fruitTargets   ?? levelFruitTargets(level);
     fruitCollected = s.fruitCollected ?? Array(GEM_TYPES).fill(0);
