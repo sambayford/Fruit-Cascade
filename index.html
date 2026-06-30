@@ -777,15 +777,18 @@ function hasValidMove() {
 
 function shuffleBoard() {
   const flat = board.flat().filter(g => g !== null);
-  for (let i = flat.length - 1; i > 0; i--) {
-    const j = rnd(i + 1);
-    [flat[i], flat[j]] = [flat[j], flat[i]];
-  }
-  let idx = 0;
-  for (let r = 0; r < ROWS; r++)
-    for (let c = 0; c < COLS; c++)
-      board[r][c] = flat[idx++];
-  if (!hasValidMove()) shuffleBoard();
+  let attempts = 0;
+  do {
+    for (let i = flat.length - 1; i > 0; i--) {
+      const j = rnd(i + 1);
+      [flat[i], flat[j]] = [flat[j], flat[i]];
+    }
+    let idx = 0;
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++)
+        board[r][c] = flat[idx++];
+    attempts++;
+  } while ((getMatches().length > 0 || !hasValidMove()) && attempts < 200);
 }
 
 function safeRandom(r, c) {
